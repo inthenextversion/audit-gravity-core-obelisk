@@ -6,7 +6,7 @@ import './UniswapV2ERC20.sol';
 import './libraries/Math.sol';
 import './libraries/UQ112x112.sol';
 import './interfaces/IERC20.sol';
-import '../interfaces/OZ_IERC20.sol'; // OpenZeppelin Version
+import './interfaces/OZ_IERC20.sol'; // OpenZeppelin Version
 import './interfaces/IUniswapV2Factory.sol';
 import './interfaces/IUniswapV2Callee.sol';
 import {Holding} from './Holding.sol';

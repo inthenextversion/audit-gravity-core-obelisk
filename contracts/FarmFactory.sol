@@ -6,13 +6,13 @@ import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {FarmV2} from "./FarmV2.sol";
-import "./interfaces/IFarmV2.sol";
+import "../interfaces/IFarmV2.sol";
 
 contract FarmFactory is Ownable{
 
     address public FarmImplementation;
     mapping(bytes32 => bool) FarmValid;
-    mapping(address => mapping(address => address)) public getFarm;
+    mapping(address => mapping(address => mapping(uint => address))) public getFarm;
     mapping(address => mapping(address => uint)) public getFarmIndex;
     mapping(address => mapping(address => uint)) public farmVersion;
     address[] public allFarms;
@@ -36,7 +36,12 @@ contract FarmFactory is Ownable{
     * @param farmAddress the address of the new farm
     * @param fid the farm ID of the new farm
     **/
-    event FarmCreated(address farmAddress, uint fid);
+    event FarmCreated(address farmAddress, uint fid, uint start, uint end);
+
+    modifier onlyWhitelist() {
+        require(whitelist[msg.sender], "Caller is not in whitelist!");
+        _;
+    }
 
     constructor(address _gfi, address _governance) {
         FarmImplementation = address(new FarmV2());
@@ -63,21 +68,28 @@ contract FarmFactory is Ownable{
         feeManager = _feeManager;
     }
 
+    function setGovernance(address _governance) external onlyOwner{
+        governance = _governance;
+    }
+
     /**
     * @dev allows caller to create farm as long as parameters are approved by factory owner
     * Creates a clone of FarmV2 contract, so that farm creation is cheap
     **/
     function createFarm(address depositToken, address rewardToken, uint amount, uint blockReward, uint start, uint end, uint bonusEnd, uint bonus) external {
-        //require statement to see if caller is able to create farm with given inputs
-        bytes32 _hash = _getFarmHash(msg.sender, depositToken, rewardToken, amount, blockReward, start, end, bonusEnd, bonus);
-        require(FarmValid[_hash], "Farm parameters are not valid!");
-        FarmValid[_hash] = false; //Revoke so caller can not call again
+        //check if caller is on whitelist, used by IDO factory
+        if(!whitelist[msg.sender]){
+            //require statement to see if caller is able to create farm with given inputs
+            bytes32 _hash = _getFarmHash(msg.sender, depositToken, rewardToken, amount, blockReward, start, end, bonusEnd, bonus);
+            require(FarmValid[_hash], "Farm parameters are not valid!");
+            FarmValid[_hash] = false; //Revoke so caller can not call again
+        }
 
         //Create the clone proxy, and add it to the getFarm mappping, and allFarms array
         farmVersion[depositToken][rewardToken] = farmVersion[depositToken][rewardToken] + 1;
         bytes32 salt = keccak256(abi.encodePacked(depositToken, rewardToken, farmVersion[depositToken][rewardToken]));
         address farmClone = Clones.cloneDeterministic(FarmImplementation, salt);
-        getFarm[depositToken][rewardToken] = farmClone;
+        getFarm[depositToken][rewardToken][farmVersion[depositToken][rewardToken]] = farmClone;
         getFarmIndex[depositToken][rewardToken] = allFarms.length;
         allFarms.push(farmClone);
         //Fund the farm
@@ -86,7 +98,7 @@ contract FarmFactory is Ownable{
         //Init the newly created farm
         IFarmV2(farmClone).initialize();
         IFarmV2(farmClone).init(depositToken, rewardToken, amount, blockReward, start, end, bonusEnd, bonus);
-        emit FarmCreated(farmClone, getFarmIndex[depositToken][rewardToken]);
+        emit FarmCreated(farmClone, getFarmIndex[depositToken][rewardToken], start, end);
     }
 
     function _getFarmHash(address from, address depositToken, address rewardToken, uint amount, uint blockReward, uint start, uint end, uint bonusEnd, uint bonus) internal pure returns(bytes32 _hash){

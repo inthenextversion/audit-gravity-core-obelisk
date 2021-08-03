@@ -5,82 +5,78 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import {IFarmFactory} from "./interfaces/IFarmFactory.sol";
-import "./interfaces/IFarmV2.sol";
+import {IFarmFactory} from "../interfaces/IFarmFactory.sol";
+import "../interfaces/IFarmV2.sol";
 import "./Share.sol";
-import "./interfaces/IShare.sol";
-import "./interfaces/iGravityToken.sol";
-import "./interfaces/IUniswapV2Router02.sol";
-import "./interfaces/IUniswapV2Factory.sol";
-import "./interfaces/IPriceOracle.sol";
-import "./interfaces/ITierChecker.sol";
+import "../interfaces/IShare.sol";
+import "../interfaces/iGravityToken.sol";
+import "../DeFi/uniswapv2/interfaces/IUniswapV2Router02.sol";
+import "../DeFi/uniswapv2/interfaces/IUniswapV2Factory.sol";
+import "../interfaces/IPriceOracle.sol";
+import "../interfaces/ITierManager.sol";
+import {UserInfo} from "../interfaces/IFarmV2.sol";
+import {FarmInfo} from "../interfaces/IFarmV2.sol";
+import {ShareInfo} from "../interfaces/ICompounderFactory.sol";//dont think this is needed
 
-struct UserInfo {
-        uint256 amount;     // LP tokens provided.
-        uint256 rewardDebt; // Reward debt.
-    }
-
-struct FarmInfo {
-        IERC20 lpToken;
-        IERC20 rewardToken;
-        uint startBlock;
-        uint blockReward;
-        uint bonusEndBlock;
-        uint bonus;
-        uint endBlock;
-        uint lastRewardBlock;  // Last block number that reward distribution occurs.
-        uint accRewardPerShare; // rewards per share, times 1e12
-        uint farmableSupply; // total amount of tokens farmable
-        uint numFarmers; // total amount of farmers
-    }
 
 contract CompounderFactory is Ownable{
-
-    struct ShareInfo{
-        address depositToken;
-        address rewardToken;
-        address shareToken;
-        uint minHarvest;
-        uint maxCallerReward;
-        uint callerFeePercent;
-        bool lpFarm;
-        address lpA; //only applies to lpFarms
-        address lpB;
-    }
-    mapping(uint => ShareInfo) public fidToShareInfo;
+    mapping(address => ShareInfo) public farmAddressToShareInfo;
     iGravityToken GFI;
     IFarmFactory Factory;
     address public ShareTokenImplementation;
-    mapping(address => mapping(address => address)) public getShareToken;
+    mapping(address => address) public getShareToken;//input the farm address to get it's share token
+    mapping(address => address) public getFarm;//input the share address to get it's farm
     address[] public allShareTokens;
     uint public vaultFee = 4; //Default 4% range 0 -> 5%
     uint public rewardBalance;
-    mapping(uint => uint) public lastHarvestDate;
+    mapping(address => uint) public lastHarvestDate;
 
     address public dustPan;
     address public feeManager;
     address public priceOracle;
     address public swapFactory;
     address public router;
+    address public tierManager;
+    address public gfi;
     uint public slippage = 0;
     uint public requiredTier;
-    address public tierChecker;
     bool public checkTiers;
+    mapping(address => bool) public whitelist;
 
-    modifier compounderExists(uint fid){
-        address depositToken = fidToShareInfo[fid].depositToken;
-        address rewardToken = fidToShareInfo[fid].rewardToken;
-        require(getShareToken[depositToken][rewardToken] != address(0), "Compounder does not exist!");
+    /**
+    @dev emitted when a new compounder is created
+    **/
+    event CompounderCreated(address _farmAddress, uint requiredTier);
+
+    /**
+    * @dev emitted when owner changes the whitelist
+    * @param _address the address that had its whitelist status changed
+    * @param newBool the new state of the address
+    **/
+    event whiteListChanged(address _address, bool newBool);
+
+    modifier compounderExists(address farmAddress){
+        require(getShareToken[farmAddress] != address(0), "Compounder does not exist!");
         _;
     }
 
-    constructor(address gfiAddress, address farmFactoryAddress, uint _requiredTier, address _tierChecker) {
+    modifier onlyWhitelist() {
+        require(whitelist[msg.sender], "Caller is not in whitelist!");
+        _;
+    }
+
+    constructor(address gfiAddress, address farmFactoryAddress, uint _requiredTier, address _tierManager) {
         GFI = iGravityToken(gfiAddress);
         Factory = IFarmFactory(farmFactoryAddress);
         Share ShareTokenRoot = new Share();
         ShareTokenImplementation = address(ShareTokenRoot);
         requiredTier = _requiredTier;
-        tierChecker = _tierChecker;
+        tierManager = _tierManager;
+    }
+
+    function adjustWhitelist(address _address, bool _bool) external onlyOwner {
+        whitelist[_address] = _bool;
+        emit whiteListChanged(_address, _bool);
     }
 
     function changeVaultFee(uint newFee) external onlyOwner{
@@ -88,20 +84,20 @@ contract CompounderFactory is Ownable{
         vaultFee = newFee;
     }
 
-    function changeTierChecker(address _tierChecker) external onlyOwner{
-        tierChecker = _tierChecker;
+    function changeTierManager(address _tierManager) external onlyOwner{
+        tierManager = _tierManager;
     }
     
     function changeCheckTiers(bool _bool) external onlyOwner{
         checkTiers = _bool;
     }
 
-    function changeShareInfo(uint fid, uint _minHarvest, uint _maxCallerReward, uint _callerFeePercent) external onlyOwner compounderExists(fid){
+    function changeShareInfo(address farmAddress, uint _minHarvest, uint _maxCallerReward, uint _callerFeePercent) external onlyOwner compounderExists(farmAddress){
         require(_callerFeePercent <= 100, 'Gravity Finance: INVALID CALLER FEE PERCENT');
 
-        fidToShareInfo[fid].minHarvest = _minHarvest;
-        fidToShareInfo[fid].maxCallerReward = _maxCallerReward;
-        fidToShareInfo[fid].callerFeePercent = _callerFeePercent;
+        farmAddressToShareInfo[farmAddress].minHarvest = _minHarvest;
+        farmAddressToShareInfo[farmAddress].maxCallerReward = _maxCallerReward;
+        farmAddressToShareInfo[farmAddress].callerFeePercent = _callerFeePercent;
     }
 
     function updateSharedVariables(address _dustPan, address _feeManager, address _priceOracle, address _swapFactory, address _router, uint _slippage) external onlyOwner{
@@ -114,16 +110,18 @@ contract CompounderFactory is Ownable{
         slippage = _slippage;
     }
 
-    function createCompounder(address _depositToken, address _rewardToken, uint _maxCallerReward, uint _callerFee, uint _minHarvest, bool _lpFarm, address _lpA, address _lpB) external onlyOwner{
-        require(getShareToken[_depositToken][_rewardToken] == address(0), "Share token already exists!");
+    function createCompounder(address _farmAddress, address _depositToken, address _rewardToken, uint _maxCallerReward, uint _callerFee, uint _minHarvest, bool _lpFarm, address _lpA, address _lpB) external onlyWhitelist{
+        
+        require(getShareToken[_farmAddress] == address(0), "Share token already exists!");
         require(_callerFee <= 100, 'Gravity Finance: INVALID CALLER FEE PERCENT');
 
         //Create the clone proxy, and add it to the getFarm mappping, and allFarms array
-        bytes32 salt = keccak256(abi.encodePacked(_depositToken, _rewardToken));
+        bytes32 salt = keccak256(abi.encodePacked(_farmAddress));
         address shareClone = Clones.cloneDeterministic(ShareTokenImplementation, salt);
-        getShareToken[_depositToken][_rewardToken] = shareClone;
+        getShareToken[_farmAddress] = shareClone;
+        getFarm[shareClone] = _farmAddress;
         allShareTokens.push(shareClone);
-        fidToShareInfo[Factory.getFarmIndex(_depositToken, _rewardToken)] = ShareInfo({
+        farmAddressToShareInfo[_farmAddress] = ShareInfo({
             depositToken: _depositToken,
             rewardToken: _rewardToken,
             shareToken: shareClone,
@@ -135,20 +133,21 @@ contract CompounderFactory is Ownable{
             lpB: _lpB
         });
         IShare(shareClone).initialize();
+        emit CompounderCreated(_farmAddress, requiredTier);
     }
 
     /**
     * @dev allows caller to deposit the depositToken corresponding to the given fid. 
     * In return caller is minted Shares for that farm
     **/
-    function depositCompounding(uint fid, uint amountToDeposit) external compounderExists(fid){
+    function depositCompounding(address farmAddress, uint amountToDeposit) external compounderExists(farmAddress){
         if(checkTiers){
-            require(ITierChecker(tierChecker).checkTier(msg.sender) >= requiredTier, "Caller does not hold high enough tier");
+            require(ITierManager(tierManager).checkTier(msg.sender) >= requiredTier, "Caller does not hold high enough tier");
         }
-        IERC20 DepositToken = IERC20(fidToShareInfo[fid].depositToken);
-        IERC20 RewardToken = IERC20(fidToShareInfo[fid].rewardToken);//could also do Farm.farmInfo.rewardToken....
-        IShare ShareToken = IShare(fidToShareInfo[fid].shareToken);
-        IFarmV2 Farm = IFarmV2(Factory.allFarms(fid));
+        IERC20 DepositToken = IERC20(farmAddressToShareInfo[farmAddress].depositToken);
+        IERC20 RewardToken = IERC20(farmAddressToShareInfo[farmAddress].rewardToken);//could also do Farm.farmInfo.rewardToken....
+        IShare ShareToken = IShare(farmAddressToShareInfo[farmAddress].shareToken);
+        IFarmV2 Farm = IFarmV2(farmAddress);
 
         //require deposit tokens are transferred into compounder
         require(DepositToken.transferFrom(msg.sender, address(this), amountToDeposit), 'Gravity Finance: TRANSFERFROM FAILED');
@@ -159,13 +158,13 @@ contract CompounderFactory is Ownable{
             sharesOwed = amountToDeposit * ShareToken.totalSupply()/Farm.userInfo(address(this)).amount;
         }
         else{
-            sharesOwed = 10**18; //1 share distrbuted
+            sharesOwed = 10**18; //1 share distrbuted NOTE Share uses 18 decimals
         }
 
         //deposit tokens into farm, but keep track of how much reward token we get
         DepositToken.approve(address(Farm), amountToDeposit);
         uint rewardBalbefore = RewardToken.balanceOf(address(this));
-        if (fidToShareInfo[fid].depositToken == fidToShareInfo[fid].rewardToken){//make sure to remove amount user just submitted
+        if (farmAddressToShareInfo[farmAddress].depositToken == farmAddressToShareInfo[farmAddress].rewardToken){//make sure to remove amount user just submitted
             rewardBalbefore = rewardBalbefore - amountToDeposit;
         }
         Farm.deposit(amountToDeposit);
@@ -180,11 +179,11 @@ contract CompounderFactory is Ownable{
     /**
     * @dev allows caller to exchange farm share tokens for corresponding farms deposit token
     **/
-    function withdrawCompounding(uint fid, uint amountToWithdraw) external compounderExists(fid){
-        IERC20 DepositToken = IERC20(fidToShareInfo[fid].depositToken);
-        IERC20 RewardToken = IERC20(fidToShareInfo[fid].rewardToken);//could also do Farm.farmInfo.rewardToken....
-        IShare ShareToken = IShare(fidToShareInfo[fid].shareToken);
-        IFarmV2 Farm = IFarmV2(Factory.allFarms(fid));
+    function withdrawCompounding(address farmAddress, uint amountToWithdraw) external compounderExists(farmAddress){
+        IERC20 DepositToken = IERC20(farmAddressToShareInfo[farmAddress].depositToken);
+        IERC20 RewardToken = IERC20(farmAddressToShareInfo[farmAddress].rewardToken);//could also do Farm.farmInfo.rewardToken....
+        IShare ShareToken = IShare(farmAddressToShareInfo[farmAddress].shareToken);
+        IFarmV2 Farm = IFarmV2(farmAddress);
 
         //figure out the amount of deposit tokens owed to caller
         uint depositTokensOwed = amountToWithdraw * Farm.userInfo(address(this)).amount/ShareToken.totalSupply();
@@ -196,7 +195,7 @@ contract CompounderFactory is Ownable{
         uint rewardBalbefore = RewardToken.balanceOf(address(this));
         Farm.withdraw(depositTokensOwed);
         uint rewardToReinvest = RewardToken.balanceOf(address(this)) - rewardBalbefore;
-        if (fidToShareInfo[fid].depositToken == fidToShareInfo[fid].rewardToken){//make sure to remove amount user just submitted to withdraw
+        if (farmAddressToShareInfo[farmAddress].depositToken == farmAddressToShareInfo[farmAddress].rewardToken){//make sure to remove amount user just submitted to withdraw
             rewardToReinvest = rewardToReinvest - depositTokensOwed;
         }
 
@@ -212,33 +211,33 @@ contract CompounderFactory is Ownable{
     * If reward token and deposit token are the same, then it just reinvests teh tokens.
     * If the deposit token is an LP token, then it swaps half the reward token for deposittokens
     **/
-    function harvestCompounding(uint fid) external compounderExists(fid) returns(uint timeTillValid) {
+    function harvestCompounding(address farmAddress) external compounderExists(farmAddress) returns(uint timeTillValid) {
 
         //check if reward and deposit are the same, if they aren't then we need to use the price oracle
-        if(fidToShareInfo[fid].depositToken != fidToShareInfo[fid].rewardToken){
-            if(fidToShareInfo[fid].lpFarm){
-                (,,timeTillValid) = IPriceOracle(priceOracle).getPrice(fidToShareInfo[fid].depositToken);
-                address pairAddress = IUniswapV2Factory(swapFactory).getPair(fidToShareInfo[fid].lpA, fidToShareInfo[fid].rewardToken);
+        if(farmAddressToShareInfo[farmAddress].depositToken != farmAddressToShareInfo[farmAddress].rewardToken){
+            if(farmAddressToShareInfo[farmAddress].lpFarm){
+                (,,timeTillValid) = IPriceOracle(priceOracle).getPrice(farmAddressToShareInfo[farmAddress].depositToken);
+                address pairAddress = IUniswapV2Factory(swapFactory).getPair(farmAddressToShareInfo[farmAddress].lpA, farmAddressToShareInfo[farmAddress].rewardToken);
                 (,,uint timeTillValidOther) = IPriceOracle(priceOracle).getPrice(pairAddress);
                 if (timeTillValid < timeTillValidOther){
                     timeTillValid = timeTillValidOther;
                 }
             }
             else{
-                address pairAddress = IUniswapV2Factory(swapFactory).getPair(fidToShareInfo[fid].depositToken, fidToShareInfo[fid].rewardToken);
+                address pairAddress = IUniswapV2Factory(swapFactory).getPair(farmAddressToShareInfo[farmAddress].depositToken, farmAddressToShareInfo[farmAddress].rewardToken);
                 (,,timeTillValid) = IPriceOracle(priceOracle).getPrice(pairAddress);
             }
         }
 
         //If timeTillValid is 0 or the reward and deposit token are the same, then proceed with the rest of the reinvest
         if(timeTillValid == 0){//Ensure swap price is valid
-            IERC20 RewardToken = IERC20(fidToShareInfo[fid].rewardToken);//could also do Farm.farmInfo.rewardToken....
+            IERC20 RewardToken = IERC20(farmAddressToShareInfo[farmAddress].rewardToken);//could also do Farm.farmInfo.rewardToken....
             uint rewardToReinvest;
             {
-                IFarmV2 Farm = IFarmV2(Factory.allFarms(fid));
+                IFarmV2 Farm = IFarmV2(farmAddress);
 
                 //make sure pending reward is greater than min harvest
-                require((Farm.pendingReward(address(this)) + rewardBalance) >= fidToShareInfo[fid].minHarvest, 'Gravity Finance: MIN HARVEST NOT MET');
+                require((Farm.pendingReward(address(this)) + rewardBalance) >= farmAddressToShareInfo[farmAddress].minHarvest, 'Gravity Finance: MIN HARVEST NOT MET');
 
                 //harvest reward keeping track of rewards harvested
                 uint rewardBalbefore = RewardToken.balanceOf(address(this));
@@ -246,30 +245,30 @@ contract CompounderFactory is Ownable{
                 rewardToReinvest = RewardToken.balanceOf(address(this)) - rewardBalbefore;
                 rewardToReinvest += rewardBalance;
             }
-            uint reward = _reinvest(fid, rewardToReinvest, true);
+            uint reward = _reinvest(farmAddress, rewardToReinvest, true);
             rewardBalance = 0;
 
-            lastHarvestDate[fid] = block.timestamp;
+            lastHarvestDate[farmAddress] = block.timestamp;
             require(RewardToken.transfer(msg.sender, reward), 'Gravity Finance: TRANSFER FAILED');
         }
     }
 
     /**
-    * @dev called at the end of depositCompounding, withdrawCompounding, and harvestCompounding
+    * @dev called at the end of harvestCompounding
     * to take any harvested rewards, convert them into the deposit token, and reinvest them
     * In order for single sided farms with different reward and deposit tokens to work, their needs to be
     * a swap pair with the reward and deposit tokens
     * In order for LP farms to work, there needs to be swap pair between reward, and lpA
     **/
-    function _reinvest(uint fid, uint amountToReinvest, bool rewardCaller) internal returns(uint callerReward){
-        IERC20 DepositToken = IERC20(fidToShareInfo[fid].depositToken);
-        IERC20 RewardToken = IERC20(fidToShareInfo[fid].rewardToken);//could also do Farm.farmInfo.rewardToken....
-        IFarmV2 Farm = IFarmV2(Factory.allFarms(fid));
+    function _reinvest(address farmAddress, uint amountToReinvest, bool rewardCaller) internal returns(uint callerReward){
+        IERC20 DepositToken = IERC20(farmAddressToShareInfo[farmAddress].depositToken);
+        IERC20 RewardToken = IERC20(farmAddressToShareInfo[farmAddress].rewardToken);//could also do Farm.farmInfo.rewardToken....
+        IFarmV2 Farm = IFarmV2(farmAddress);
 
         if(vaultFee > 0){//handle vault fee
             uint fee = vaultFee * amountToReinvest / 100;
             amountToReinvest = amountToReinvest - fee;
-            if(fidToShareInfo[fid].rewardToken == address(GFI)){//burn it
+            if(farmAddressToShareInfo[farmAddress].rewardToken == address(GFI)){//burn it
                 GFI.burn(fee);
             }
             else{//send it to fee manager
@@ -278,22 +277,22 @@ contract CompounderFactory is Ownable{
         }
         //handle caller reward
         if(rewardCaller){
-            callerReward = fidToShareInfo[fid].callerFeePercent * amountToReinvest / 100;
-            if (callerReward > fidToShareInfo[fid].maxCallerReward){
-                callerReward = fidToShareInfo[fid].maxCallerReward;
+            callerReward = farmAddressToShareInfo[farmAddress].callerFeePercent * amountToReinvest / 100;
+            if (callerReward > farmAddressToShareInfo[farmAddress].maxCallerReward){
+                callerReward = farmAddressToShareInfo[farmAddress].maxCallerReward;
             }
             amountToReinvest = amountToReinvest - callerReward;
         } 
 
         //check if the deposit token and the reward token are not the same
-        if (fidToShareInfo[fid].depositToken != fidToShareInfo[fid].rewardToken){
+        if (farmAddressToShareInfo[farmAddress].depositToken != farmAddressToShareInfo[farmAddress].rewardToken){
             address[] memory path = new address[](2);
             uint[] memory amounts = new uint[](2);
 
-            if (fidToShareInfo[fid].lpFarm){//Dealing with an LP farm so swap half the reward for deposit and supply liqduity
+            if (farmAddressToShareInfo[farmAddress].lpFarm){//Dealing with an LP farm so swap half the reward for deposit and supply liqduity
                 
-                path[0] = fidToShareInfo[fid].rewardToken;
-                path[1] = fidToShareInfo[fid].lpA;
+                path[0] = farmAddressToShareInfo[farmAddress].rewardToken;
+                path[1] = farmAddressToShareInfo[farmAddress].lpA;
                 RewardToken.approve(router, amountToReinvest);
                 (uint minAmount,) = IPriceOracle(priceOracle).calculateMinAmount(path[0], slippage, amountToReinvest, IUniswapV2Factory(swapFactory).getPair(path[0], path[1]));
                 amounts = IUniswapV2Router02(router).swapExactTokensForTokens(
@@ -304,8 +303,8 @@ contract CompounderFactory is Ownable{
                     block.timestamp
                 );
 
-                path[0] = fidToShareInfo[fid].lpA;
-                path[1] = fidToShareInfo[fid].lpB;
+                path[0] = farmAddressToShareInfo[farmAddress].lpA;
+                path[1] = farmAddressToShareInfo[farmAddress].lpB;
                 IERC20(path[0]).approve(router, amounts[1]/2);
                 (minAmount,) = IPriceOracle(priceOracle).calculateMinAmount(path[0], slippage, amounts[1] / 2, address(DepositToken));
                 amounts = IUniswapV2Router02(router).swapExactTokensForTokens(
@@ -339,11 +338,11 @@ contract CompounderFactory is Ownable{
 
             }
             else{//need to swap all reward for deposit token
-                address pairAddress = IUniswapV2Factory(swapFactory).getPair(fidToShareInfo[fid].depositToken, fidToShareInfo[fid].rewardToken);
-                path[0] = fidToShareInfo[fid].rewardToken;
-                path[1] = fidToShareInfo[fid].depositToken;
+                address pairAddress = IUniswapV2Factory(swapFactory).getPair(farmAddressToShareInfo[farmAddress].depositToken, farmAddressToShareInfo[farmAddress].rewardToken);
+                path[0] = farmAddressToShareInfo[farmAddress].rewardToken;
+                path[1] = farmAddressToShareInfo[farmAddress].depositToken;
                 RewardToken.approve(router, amountToReinvest);
-                (uint minAmount,) = IPriceOracle(priceOracle).calculateMinAmount(fidToShareInfo[fid].rewardToken, slippage, amountToReinvest, pairAddress);
+                (uint minAmount,) = IPriceOracle(priceOracle).calculateMinAmount(farmAddressToShareInfo[farmAddress].rewardToken, slippage, amountToReinvest, pairAddress);
                 amounts = IUniswapV2Router02(router).swapExactTokensForTokens(
                     amountToReinvest,
                     minAmount,

@@ -2,7 +2,7 @@
 
 pragma solidity =0.6.12;
 
-import "../interfaces/OZ_IERC20.sol";
+import "./interfaces/OZ_IERC20.sol";
 import "./libraries/SafeMath.sol";
 import "./interfaces/iGovernance.sol";
 import "./interfaces/IERC20.sol";
