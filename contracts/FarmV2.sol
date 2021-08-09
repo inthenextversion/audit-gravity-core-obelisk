@@ -3,10 +3,10 @@
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "../interfaces/iGovernance.sol";
-import "../interfaces/IFarmFactory.sol";
-import "../interfaces/IIncinerator.sol";
-import "../interfaces/iGravityToken.sol";
+import "./interfaces/iGovernance.sol";
+import "./interfaces/IFarmFactory.sol";
+import "./interfaces/IIncinerator.sol";
+import "./interfaces/iGravityToken.sol";
 import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 
 contract FarmV2 is Initializable{
@@ -36,8 +36,6 @@ contract FarmV2 is Initializable{
 
     FarmInfo public farmInfo;
     mapping (address => UserInfo) public userInfo;
-
-    uint256 public totalStakedAmount; 
     
     modifier onlyFactory() {
         require(msg.sender == FarmFactory);
@@ -112,7 +110,7 @@ contract FarmV2 is Initializable{
     function pendingReward(address _user) external view returns (uint256) {
         UserInfo storage user = userInfo[_user];
         uint256 accRewardPerShare = farmInfo.accRewardPerShare;
-        uint256 lpSupply = totalStakedAmount;
+        uint256 lpSupply = farmInfo.lpToken.balanceOf(address(this));
         if (block.number > farmInfo.lastRewardBlock && lpSupply != 0) {
             uint256 multiplier = getMultiplier(farmInfo.lastRewardBlock, block.number);
             uint256 tokenReward = multiplier * farmInfo.blockReward;
@@ -128,7 +126,7 @@ contract FarmV2 is Initializable{
         if (block.number <= farmInfo.lastRewardBlock) {
             return;
         }
-        uint256 lpSupply = totalStakedAmount;
+        uint256 lpSupply = farmInfo.lpToken.balanceOf(address(this));
         if (lpSupply == 0) {
             farmInfo.lastRewardBlock = block.number < farmInfo.endBlock ? block.number : farmInfo.endBlock;
             return;
@@ -166,7 +164,6 @@ contract FarmV2 is Initializable{
             farmInfo.numFarmers += 1;
         }
         farmInfo.lpToken.transferFrom(address(msg.sender), address(this), _amount);
-        totalStakedAmount = totalStakedAmount + _amount; 
         user.amount += _amount;
         user.rewardDebt = (user.amount * farmInfo.accRewardPerShare)/1e12; //already rewarded tokens
         emit Deposit(msg.sender, _amount);
@@ -197,7 +194,6 @@ contract FarmV2 is Initializable{
         safeRewardTransfer(msg.sender, pending);
         user.amount -= _amount;
         user.rewardDebt = (user.amount * farmInfo.accRewardPerShare)/1e12;
-        totalStakedAmount = totalStakedAmount - _amount; 
         farmInfo.lpToken.transfer(address(msg.sender), _amount);
         emit Withdraw(msg.sender, _amount);
     }
@@ -207,15 +203,13 @@ contract FarmV2 is Initializable{
      */
     function emergencyWithdraw() public {
         UserInfo storage user = userInfo[msg.sender];
-        uint256 _amount = user.amount;
-        user.amount = 0;
-        user.rewardDebt = 0;
-        totalStakedAmount = totalStakedAmount - _amount; 
-        if (_amount > 0) {
+        farmInfo.lpToken.transfer(address(msg.sender), user.amount);
+        emit EmergencyWithdraw(msg.sender, user.amount);
+        if (user.amount > 0) {
             farmInfo.numFarmers -= 1;
         }
-        farmInfo.lpToken.transfer(address(msg.sender), _amount);
-        emit EmergencyWithdraw(msg.sender, _amount);
+        user.amount = 0;
+        user.rewardDebt = 0;
     }
 
     /**
