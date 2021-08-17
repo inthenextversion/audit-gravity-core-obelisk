@@ -32,6 +32,12 @@ contract UniswapV2Factory is IUniswapV2Factory {
 
     event PairCreated(address indexed token0, address indexed token1, address pair, uint);
 
+    event AddressChanged(address oldAddress, address newAddress);
+
+    event PausedChanged(bool newState);
+
+    event SlippageUpdated(uint newSlippage);
+
     constructor(address _feeToSetter, address _gfi, address _weth, address _wbtc) public {
         feeToSetter = _feeToSetter;
         gfi = _gfi;
@@ -72,56 +78,67 @@ contract UniswapV2Factory is IUniswapV2Factory {
 
     function setMigrator(address _migrator) external override {
         require(msg.sender == feeToSetter, 'Gravity Finance: FORBIDDEN');
+        emit AddressChanged(migrator, _migrator);
         migrator = _migrator;
     }
 
     function setFeeToSetter(address _feeToSetter) external override {
         require(msg.sender == feeToSetter, 'Gravity Finance: FORBIDDEN');
+        emit AddressChanged(feeToSetter, _feeToSetter);
         feeToSetter = _feeToSetter;
     }
 
     function setRouter(address _router) external {
         require(msg.sender == feeToSetter, 'Gravity Finance: FORBIDDEN');
+        emit AddressChanged(router, _router);
         router = _router;
     }
 
     function setGovernor(address _governor) external {
         require(msg.sender == feeToSetter, 'Gravity Finance: FORBIDDEN');
+        emit AddressChanged(governor, _governor);
         governor = _governor;
     }
 
     function setPathOracle(address _pathOracle) external {
         require(msg.sender == feeToSetter, 'Gravity Finance: FORBIDDEN');
+        emit AddressChanged(pathOracle, _pathOracle);
         pathOracle = _pathOracle;
     }
 
     function setPriceOracle(address _priceOracle) external {
         require(msg.sender == feeToSetter, 'Gravity Finance: FORBIDDEN');
+        emit AddressChanged(priceOracle, _priceOracle);
         priceOracle = _priceOracle;
     }
 
     function setEarningsManager(address _earningsManager) external {
         require(msg.sender == feeToSetter, 'Gravity Finance: FORBIDDEN');
+        emit AddressChanged(earningsManager, _earningsManager);
         earningsManager = _earningsManager;
     }
 
     function setFeeManager(address _feeManager) external {
         require(msg.sender == feeToSetter, 'Gravity Finance: FORBIDDEN');
+        emit AddressChanged(feeManager, _feeManager);
         feeManager = _feeManager;
     }
 
     function setDustPan(address _dustPan) external {
         require(msg.sender == feeToSetter, 'Gravity Finance: FORBIDDEN');
+        emit AddressChanged(dustPan, _dustPan);
         dustPan = _dustPan;
     }
 
     function setPaused(bool _paused) external {
         require(msg.sender == feeToSetter, 'Gravity Finance: FORBIDDEN');
         paused = _paused;
+        emit PausedChanged(paused);
     }
 
     function setSlippage(uint _slippage) external {
         require(msg.sender == feeToSetter, 'Gravity Finance: FORBIDDEN');
         slippage = _slippage;
+        emit SlippageUpdated(slippage);
     }
 }

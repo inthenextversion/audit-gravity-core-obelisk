@@ -7,12 +7,10 @@ import '../DeFi/uniswapv2/interfaces/IUniswapV2Factory.sol';
 
 /**
 * @dev OWNER SHOULD CALL alterPath(weth, wbtc) after deployment to set the final path properly
-* NOTE could remove the favoredLength and use favoredAssets.length instead
 **/
 contract PathOracle is Ownable {
     mapping(address => address) public pathMap;
     address[] public favoredAssets;
-    uint public favoredLength;
     address public factory;
     IUniswapV2Factory Factory;
 
@@ -34,14 +32,21 @@ contract PathOracle is Ownable {
     **/
     event pathAppended(address leaf, address branch);
 
-    constructor(address[] memory _favored, uint _favoredLength) {
+    event FactoryChanged(address newFactory);
+
+    constructor(address[] memory _favored) {
+        require(favoredAssets.length <= 10, 'Gravity Finance: Favored Assets array too large');
         favoredAssets = _favored;
-        favoredLength = _favoredLength;
     }
 
     modifier onlyFactory() {
         require(msg.sender == factory, "Gravity Finance: FORBIDDEN");
         _;
+    }
+
+    function setFavored(address[] memory _favored) external onlyOwner{
+        require(favoredAssets.length <= 10, 'Gravity Finance: Favored Assets array too large');
+        favoredAssets = _favored;
     }
 
     /**
@@ -70,6 +75,7 @@ contract PathOracle is Ownable {
     function setFactory(address _address) external onlyOwner {
         factory = _address;
         Factory = IUniswapV2Factory(factory);
+        emit FactoryChanged(factory);
     }
 
     /**
@@ -78,9 +84,9 @@ contract PathOracle is Ownable {
     * @param token1 address of the second token in the pair
     **/
     function appendPath(address token0, address token1) external onlyFactory {
-        bool inFavored;
+        bool inFavored = false;
         //First Check if either of the tokens are in the favored list
-        for (uint i=0; i < favoredLength; i++){
+        for (uint i=0; i < favoredAssets.length; i++){
             if (token0 == favoredAssets[i]){
                 pathMap[token1] = token0; //Swap token1 for token0
                 inFavored = true;
@@ -97,7 +103,7 @@ contract PathOracle is Ownable {
         }
         //If neither of the tokens are in the favored list, then see if either of them have pairs with a token in the favored list
         if (!inFavored){
-            for (uint i=0; i < favoredLength; i++){
+            for (uint i=0; i < favoredAssets.length; i++){
                 if (Factory.getPair(token0, favoredAssets[i]) != address(0)){
                     pathMap[token1] = token0; //Swap token1 for token0
                     pathMap[token0] = favoredAssets[i];

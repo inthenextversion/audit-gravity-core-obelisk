@@ -55,6 +55,16 @@ contract CompounderFactory is Ownable{
     **/
     event whiteListChanged(address _address, bool newBool);
 
+    event VaultFeeChanged(uint newFee);
+
+    event TierManagerChanged(address newManager);
+
+    event TierCheckingUpdated(bool newState);
+
+    event ShareInfoUpdated(address farmAddress, uint _minHarvest, uint _maxCallerReward, uint _callerFeePercent);
+
+    event SharedVariablesUpdated(address _dustPan, address _feeManager, address _priceOracle, address _swapFactory, address _router, uint _slippage);
+
     modifier compounderExists(address farmAddress){
         require(getShareToken[farmAddress] != address(0), "Compounder does not exist!");
         _;
@@ -82,14 +92,17 @@ contract CompounderFactory is Ownable{
     function changeVaultFee(uint newFee) external onlyOwner{
         require(newFee <= 5, 'Gravity Finance: FORBIDDEN');
         vaultFee = newFee;
+        emit VaultFeeChanged(vaultFee);
     }
 
     function changeTierManager(address _tierManager) external onlyOwner{
         tierManager = _tierManager;
+        emit TierManagerChanged(tierManager);
     }
     
     function changeCheckTiers(bool _bool) external onlyOwner{
         checkTiers = _bool;
+        emit TierCheckingUpdated(checkTiers);
     }
 
     function changeShareInfo(address farmAddress, uint _minHarvest, uint _maxCallerReward, uint _callerFeePercent) external onlyOwner compounderExists(farmAddress){
@@ -98,6 +111,7 @@ contract CompounderFactory is Ownable{
         farmAddressToShareInfo[farmAddress].minHarvest = _minHarvest;
         farmAddressToShareInfo[farmAddress].maxCallerReward = _maxCallerReward;
         farmAddressToShareInfo[farmAddress].callerFeePercent = _callerFeePercent;
+        emit ShareInfoUpdated(farmAddress, _minHarvest, _maxCallerReward, _callerFeePercent);
     }
 
     function updateSharedVariables(address _dustPan, address _feeManager, address _priceOracle, address _swapFactory, address _router, uint _slippage) external onlyOwner{
@@ -108,6 +122,7 @@ contract CompounderFactory is Ownable{
         swapFactory = _swapFactory;
         router = _router;
         slippage = _slippage;
+        emit SharedVariablesUpdated(_dustPan, _feeManager, _priceOracle, _swapFactory, _router, _slippage);
     }
 
     function createCompounder(address _farmAddress, address _depositToken, address _rewardToken, uint _maxCallerReward, uint _callerFee, uint _minHarvest, bool _lpFarm, address _lpA, address _lpB) external onlyWhitelist{
@@ -245,7 +260,7 @@ contract CompounderFactory is Ownable{
                 rewardToReinvest = RewardToken.balanceOf(address(this)) - rewardBalbefore;
                 rewardToReinvest += rewardBalance;
             }
-            uint reward = _reinvest(farmAddress, rewardToReinvest, true);
+            uint reward = _reinvest(farmAddress, rewardToReinvest);
             rewardBalance = 0;
 
             lastHarvestDate[farmAddress] = block.timestamp;
@@ -260,7 +275,7 @@ contract CompounderFactory is Ownable{
     * a swap pair with the reward and deposit tokens
     * In order for LP farms to work, there needs to be swap pair between reward, and lpA
     **/
-    function _reinvest(address farmAddress, uint amountToReinvest, bool rewardCaller) internal returns(uint callerReward){
+    function _reinvest(address farmAddress, uint amountToReinvest) internal returns(uint callerReward){
         IERC20 DepositToken = IERC20(farmAddressToShareInfo[farmAddress].depositToken);
         IERC20 RewardToken = IERC20(farmAddressToShareInfo[farmAddress].rewardToken);//could also do Farm.farmInfo.rewardToken....
         IFarmV2 Farm = IFarmV2(farmAddress);
@@ -276,7 +291,7 @@ contract CompounderFactory is Ownable{
             }
         }
         //handle caller reward
-        if(rewardCaller){
+        if(farmAddressToShareInfo[farmAddress].callerFeePercent > 0){
             callerReward = farmAddressToShareInfo[farmAddress].callerFeePercent * amountToReinvest / 100;
             if (callerReward > farmAddressToShareInfo[farmAddress].maxCallerReward){
                 callerReward = farmAddressToShareInfo[farmAddress].maxCallerReward;

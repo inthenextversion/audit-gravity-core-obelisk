@@ -41,6 +41,10 @@ contract FarmFactory is Ownable{
     **/
     event FarmCreated(address farmAddress, address depositToken, address rewardToken, uint start, uint end);
 
+    event HarvestFeeChanged(uint newFee);
+
+    event AddressChanged(address oldAddress, address newAddress);
+
     modifier onlyWhitelist() {
         require(whitelist[msg.sender], "Caller is not in whitelist!");
         _;
@@ -59,19 +63,22 @@ contract FarmFactory is Ownable{
 
     function setHarvestFee(uint _fee) external onlyOwner{
         require(_fee <= 5, "New fee can not be greater than 5%");
-        require(_fee >= 0, "New fee must be greater than or equal to 0");
         harvestFee = _fee;
+        emit HarvestFeeChanged(harvestFee);
     }
 
     function setIncinerator(address _incinerator) external onlyOwner{
+        emit AddressChanged(incinerator, _incinerator);
         incinerator = _incinerator;
     }
 
     function setFeeManager(address _feeManager) external onlyOwner{
+        emit AddressChanged(feeManager, _feeManager);
         feeManager = _feeManager;
     }
 
     function setGovernance(address _governance) external onlyOwner{
+        emit AddressChanged(governance, _governance);
         governance = _governance;
     }
 

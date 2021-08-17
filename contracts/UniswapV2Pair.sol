@@ -109,6 +109,14 @@ contract UniswapV2Pair is UniswapV2ERC20 {
         emit HandleEarnings(amount);
     }
 
+    /**
+    * @dev called by the Earnings manager after wETH earnings are converted into pool assets, and deposited into the pool
+    **/
+    function destroy(uint value) external onlyEarningsManager returns(bool){
+        _burn(msg.sender, value);
+        return true;
+    }
+
     // update reserves and, on the first call per block, price accumulators
     function _update(uint balance0, uint balance1, uint112 _reserve0, uint112 _reserve1) private {
         require(balance0 <= uint112(-1) && balance1 <= uint112(-1), 'Gravity Finance: OVERFLOW');

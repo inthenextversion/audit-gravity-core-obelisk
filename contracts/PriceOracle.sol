@@ -37,9 +37,7 @@ contract PriceOracle is Ownable{
 
 
     constructor(uint _priceValidStart, uint _priceValidEnd) {
-        require(_priceValidStart >= 300, "Price maturity must be greater than 300 seconds");
-        require(_priceValidStart <= 3600, "Price maturity must be less than 3600 seconds");
-        require(_priceValidStart * 2 == _priceValidEnd, "Price expiration must be equal to 2x price maturity");
+        _checkSuggestedPriceWindow(_priceValidStart, _priceValidEnd);
         priceValidStart = _priceValidStart;
         priceValidEnd = _priceValidEnd;
     }
@@ -50,12 +48,16 @@ contract PriceOracle is Ownable{
     * @param _priceValidEnd hwo many seconds it takes for a price to expire from when it is logged
     **/
     function setTimingReq(uint _priceValidStart, uint _priceValidEnd) external onlyOwner{
-        require(_priceValidStart >= 300, "Price maturity must be greater than 300 seconds");
-        require(_priceValidStart <= 3600, "Price maturity must be less than 3600 seconds");
-        require(_priceValidStart * 2 == _priceValidEnd, "Price expiration must be equal to 2x price maturity");
+        _checkSuggestedPriceWindow(_priceValidStart, _priceValidEnd);
         priceValidStart = _priceValidStart; 
         priceValidEnd = _priceValidEnd;
         emit priceWindowChanged(priceValidStart, priceValidEnd);
+    }
+
+    function _checkSuggestedPriceWindow(uint _priceValidStart, uint _priceValidEnd) internal pure {
+        require(_priceValidStart >= 300, "Price maturity must be greater than 300 seconds");
+        require(_priceValidStart <= 3600, "Price maturity must be less than 3600 seconds");
+        require(_priceValidStart * 2 == _priceValidEnd, "Price expiration must be equal to 2x price maturity");
     }
 
     /** 

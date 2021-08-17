@@ -60,7 +60,7 @@ contract Share is ERC20SnapshotInitializable {
         else if(shareStats.lpFarm){
             address pair = IUniswapV2Factory(CompounderFactory.swapFactory()).getPair(shareStats.lpA, shareStats.lpB);
             uint GFIinPair = IERC20(CompounderFactory.gfi()).balanceOf(pair);
-            depositTokenToGFI = (10 ** decimals()) * GFIinPair/IUniswapV2Pair(pair).totalSupply();
+            depositTokenToGFI = ( (10 ** decimals()) * GFIinPair ) / IUniswapV2Pair(pair).totalSupply();
         }
         else{
             depositTokenToGFI = 0; //deposit token is not an Lp token or GFI so there is no conversion
@@ -72,14 +72,14 @@ contract Share is ERC20SnapshotInitializable {
         //grab the amount of shares _address had at last snapshot, then use  shareToDepositToken, and depositTokenToGFI
         //to calculate GFI worth
         uint userSnapshotBalance = balanceOfAt(_address, _getCurrentSnapshotId());
-        shareValuation = (userSnapshotBalance * shareToDepositToken / (10 ** decimals())) * depositTokenToGFI / (10 ** decimals());
+        shareValuation = ( ( (userSnapshotBalance * shareToDepositToken) / (10 ** decimals()) ) * depositTokenToGFI ) / (10 ** decimals());
     } 
 
     function getSharesGFICurrentWorth(address _address) view external returns(uint shareValuation){
         //record shareToDepositToken evaluation
         address farm = CompounderFactory.getFarm(address(this));
         UserInfo memory stats = IFarmV2(farm).userInfo(address(CompounderFactory));
-        uint tmpshareToDepositToken = (10 ** decimals()) * stats.amount/totalSupply(); 
+        uint tmpshareToDepositToken = ( (10 ** decimals()) * stats.amount ) / totalSupply(); 
 
         //record depositTokenToGFI evaluation
         uint tmpdepositTokenToGFI;
@@ -90,13 +90,13 @@ contract Share is ERC20SnapshotInitializable {
         else if(shareStats.lpFarm){
             address pair = IUniswapV2Factory(CompounderFactory.swapFactory()).getPair(shareStats.lpA, shareStats.lpB);
             uint GFIinPair = IERC20(CompounderFactory.gfi()).balanceOf(pair);
-            tmpdepositTokenToGFI = (10 ** decimals()) * GFIinPair/IUniswapV2Pair(pair).totalSupply();
+            tmpdepositTokenToGFI = ( (10 ** decimals()) * GFIinPair ) / IUniswapV2Pair(pair).totalSupply();
         }
         else{
             tmpdepositTokenToGFI = 0; //deposit token is not an Lp token or GFI so there is no conversion
         }
 
-        shareValuation = (balanceOf(_address) * tmpshareToDepositToken / (10 ** decimals())) * tmpdepositTokenToGFI / (10 ** decimals());
+        shareValuation = ( ( (balanceOf(_address) * tmpshareToDepositToken) / (10 ** decimals()) ) * tmpdepositTokenToGFI ) / (10 ** decimals());
     }
 
     function viewCurrentSnapshotID() external view returns(uint ID){
