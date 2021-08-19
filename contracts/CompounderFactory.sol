@@ -126,7 +126,9 @@ contract CompounderFactory is Ownable{
     }
 
     function createCompounder(address _farmAddress, address _depositToken, address _rewardToken, uint _maxCallerReward, uint _callerFee, uint _minHarvest, bool _lpFarm, address _lpA, address _lpB) external onlyWhitelist{
-        
+        if(_lpFarm){
+            require(_rewardToken != _lpA, "Set lpB equal to reward token");
+        }
         require(getShareToken[_farmAddress] == address(0), "Share token already exists!");
         require(_callerFee <= 100, 'Gravity Finance: INVALID CALLER FEE PERCENT');
 
