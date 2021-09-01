@@ -25,12 +25,12 @@ contract Share is ERC20SnapshotInitializable {
     }
 
     modifier onlyFactory() {
-        require(msg.sender == address(CompounderFactory));
+        require(msg.sender == address(CompounderFactory), "Caller is not Compounder Factory");
         _;
     }
 
     modifier onlyTierManager() {
-        require(msg.sender == CompounderFactory.tierManager());
+        require(msg.sender == CompounderFactory.tierManager(), "Caller is not Tier Manager");
         _;
     }
 
